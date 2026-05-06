@@ -1399,20 +1399,39 @@ def haskell_ghci_global_impl(ctx: AnalysisContext) -> list[Provider]:
     else:
         ctx.actions.write(toolchain_pkg_args_file.as_output(), "")
 
+    # Top-level target's direct toolchain deps. Used by compute_exposed_packages
+    # as a tiebreaker for genuine module-name conflicts (two packages that both
+    # OWN the same module, with no re-export relation between them — e.g.
+    # base64 and base64-bytestring). Mirrors what a regular per-component
+    # buck2 build does for `dep`'s own sources: if `dep` directly depends on
+    # base64-bytestring (and not base64), then for `dep`'s `import
+    # Data.ByteString.Base64` the canonical resolution is base64-bytestring.
+    # Re-export-only conflicts (amazonka/amazonka-core, singletons/
+    # singletons-th, etc.) don't reach this tiebreaker — they're resolved
+    # purely from .conf data by preferring the owning package.
+    top_level_toolchain_deps = []
+    dep_provider = dep.get(HaskellLibraryProvider)
+    if dep_provider != None and dep_provider.lib != None:
+        dep_lib_info = dep_provider.lib.get(link_style)
+        if dep_lib_info != None:
+            top_level_toolchain_deps = [tc.name for tc in dep_lib_info.toolchain_dependencies]
+
     # Build exposed-package flags. Package specs with parens can't be inlined
     # into a bash exec line (bash treats '(' as special syntax), so we write
     # them to an args file and reference it with '@' from the wrapper script.
     #
-    # When thin_packages priority pairs are provided, the compute_exposed_packages
-    # script reads .conf files at build time to determine which modules each
-    # package owns, then emits -package flags with GHC thinning syntax to
-    # resolve conflicts automatically (no manual module lists needed).
+    # compute_exposed_packages reads .conf files to determine which modules
+    # each package exposes (distinguishing owned vs re-exported), resolves
+    # conflicts using top_level_toolchain_deps as a tiebreaker, and falls
+    # back to manual thin_packages pairs only for cases where neither owner
+    # is a direct top-level dep.
     exposed_packages_args_file = ctx.actions.declare_output("exposed_packages.args")
     all_exposed_pkg_names = [pkg.name for pkg in toolchain_packages] + precompiled_pkg_names
     if haskell_toolchain.packages and toolchain_pkgdbs_forced != None:
         cep_args = cmd_args(
             cmd_args(toolchain_pkgdbs_forced, format = "--pkgdbs-forced={}"),
             cmd_args(json.encode(all_exposed_pkg_names), format = "--exposed-packages={}"),
+            cmd_args(json.encode(top_level_toolchain_deps), format = "--top-level-toolchain-deps={}"),
             cmd_args(json.encode(ctx.attrs.thin_packages), format = "--thin-pairs={}"),
             cmd_args(exposed_packages_args_file.as_output(), format = "--output={}"),
         )
