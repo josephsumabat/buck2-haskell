@@ -131,6 +131,15 @@ def _replace_template_values(
                 string=script_template,
             )
 
+    # An optional macro that wasn't provided for this target (e.g. <dep_srcs_flag>
+    # for a target whose deps are all libraries, or an empty <exposed_packages>)
+    # is left untouched as the literal token "<name>" by the passes above. On the
+    # exec line bash parses that literal as an input redirection (`< name`) from a
+    # nonexistent file, which crashes the generated script. Drop any remaining
+    # "<macro>" tokens so unprovided optionals become empty (the intended
+    # "flag absent" behaviour) instead.
+    script_template = re.sub(r"<[A-Za-z0-9_]+>", "", script_template)
+
     with open(output_fpath, "w") as output_file:
         output_file.write(script_template)
 
