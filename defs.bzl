@@ -497,6 +497,7 @@ haskell_library = rule(
             "use_same_package_name": attrs.bool(default = False),
             "allow_worker": attrs.bool(default = True),
             "no_default_info": attrs.bool(default = False),
+            "default_output": attrs.enum(["manifest", "library"], default = "manifest"),
 
             # extra needed (from rules_impl.bzl)
             "preferred_linkage": attrs.enum(Linkage.values(), default = "any"),
