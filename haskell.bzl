@@ -1196,7 +1196,15 @@ def haskell_library_impl(ctx: AnalysisContext) -> list[Provider]:
         sub_targets["metadata"] = [DefaultInfo(default_output = def_md_file)]
 
     actual_link_style = _get_actual_link_style(ctx, preferred_linkage)
-    default_output = hlib_infos[actual_link_style].libs
+
+    default_compiled = non_profiling_hlib[actual_link_style].compiled
+    manifest_outputs = default_compiled.interfaces + default_compiled.objects
+    manifest = ctx.actions.write("manifest.txt", cmd_args(manifest_outputs))
+    manifest = manifest.with_associated_artifacts(manifest_outputs)
+    sub_targets["manifest"] = [DefaultInfo(
+        default_output = manifest,
+        other_outputs = manifest_outputs,
+    )]
 
     haddock = haskell_haddock_lib(
         ctx,
@@ -1240,7 +1248,8 @@ def haskell_library_impl(ctx: AnalysisContext) -> list[Provider]:
         def_info = DefaultInfo()
     else:
         def_info = DefaultInfo(
-            default_outputs = default_output,
+            default_outputs = [manifest],
+            other_outputs = manifest_outputs,
             sub_targets = sub_targets,
         )
     providers = [
@@ -1480,20 +1489,20 @@ def _dynamic_link_binary_impl(
     if arg.link_style == LinkStyle("shared"):
         shlib_entries = []
         components = link_group_tset.reduce("components")
-        for x in link_group_tset.traverse():
-            shlib_entries.append((x.lib.basename, x.lib))
+        for link_group in link_group_tset.traverse():
+            shlib_entries.append((link_group.lib.basename, link_group.lib))
         if not arg.link_haskell_objects_at_once:
-            for x in arg.haskell_library_tset.traverse():
-                if x.name not in components:
-                    shlib_entries.extend([(lib.basename, lib) for lib in x.libs])
+            for hlib in arg.haskell_library_tset.traverse():
+                if hlib.name not in components:
+                    shlib_entries.extend([(lib.basename, lib) for lib in hlib.libs])
 
         unnamed_packages = 0
-        for x in toolchain_package_db_tset.traverse():
-            if x.name:
-                shlib_entries.append((x.name, x.path))
+        for toolchain_pkg in toolchain_package_db_tset.traverse():
+            if toolchain_pkg.name:
+                shlib_entries.append((toolchain_pkg.name, toolchain_pkg.path))
             else:
                 unnamed_packages += 1
-                shlib_entries.append(("{}".format(unnamed_packages), x.path))
+                shlib_entries.append(("{}".format(unnamed_packages), toolchain_pkg.path))
 
         shlibs_dict = {}
         for (name, artifact) in shlib_entries:
